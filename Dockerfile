@@ -5,12 +5,6 @@ FROM python:3.11-slim
 # ---------------------------
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV DJANGO_ENV=production
-ENV MYSQL_DATABASE=userservice_db
-ENV MYSQL_USER=root
-ENV MYSQL_PASSWORD=root
-ENV MYSQL_HOST=host.docker.internal
-ENV MYSQL_PORT=3306
 
 # ---------------------------
 # Working directory
@@ -34,7 +28,7 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt /app/
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt \
-    && pip install mysqlclient
+    && pip install mysqlclient gunicorn
 
 # ---------------------------
 # Copy project files
@@ -47,6 +41,6 @@ COPY . /app/
 EXPOSE 8000
 
 # ---------------------------
-# Run Django server
+# Run with gunicorn
 # ---------------------------
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["gunicorn", "user_service.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4"]

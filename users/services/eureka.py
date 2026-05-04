@@ -34,21 +34,14 @@ def _get_host_ip():
 # CLEANUP DES ANCIENNES INSTANCES
 # ---------------------------
 def cleanup_old_instances():
-    """Supprime les anciennes instances USER-SERVICE d’Eureka"""
-    EUREKA_SERVER = get_config("eureka.server", "http://192.168.172.81:8761")
-    APP_NAME = get_config("service.name", "USER-SERVICE").upper()
+    """Supprime les anciennes instances USER-SERVICE d'Eureka"""
+    EUREKA_SERVER = os.environ.get("EUREKA_URL", get_config("eureka.server", "http://ec2-16-171-142-15.eu-north-1.compute.amazonaws.com:8761"))
+    APP_NAME = "USER-SERVICE"
 
     try:
         response = requests.get(f"{EUREKA_SERVER}/apps/{APP_NAME}", timeout=5)
         if response.status_code == 200:
             logger.info("🧹 Nettoyage des anciennes instances...")
-            for instance_type in ["user-service", "192.168.172.75"]:
-                try:
-                    delete_url = f"{EUREKA_SERVER}/apps/{APP_NAME}/{instance_type}:{APP_NAME}:8000"
-                    r = requests.delete(delete_url, timeout=5)
-                    logger.info(f"   Supprimé {instance_type}: {r.status_code}")
-                except Exception as e:
-                    logger.warning(f"Impossible de supprimer {instance_type}: {e}")
     except Exception as e:
         logger.warning(f"⚠️ Impossible de nettoyer: {e}")
 
@@ -57,16 +50,16 @@ def cleanup_old_instances():
 # REGISTER TO EUREKA
 # ---------------------------
 def register():
-    """Enregistre USER-SERVICE sur Eureka avec IP fixe et VIP"""
-    EUREKA_SERVER = get_config("eureka.server", "http://192.168.172.81:8761")
-    APP_NAME = get_config("service.name", "USER-SERVICE").upper()
-    PORT = str(get_config("service.port", "8000"))
+    """Enregistre USER-SERVICE sur Eureka"""
+    EUREKA_SERVER = os.environ.get("EUREKA_URL", get_config("eureka.server", "http://ec2-16-171-142-15.eu-north-1.compute.amazonaws.com:8761"))
+    APP_NAME = "USER-SERVICE"
+    PORT = os.environ.get("APP_PORT", get_config("service.port", "8000"))
 
-    # ⚠️ IP FIXE pour que la Gateway puisse atteindre le service
-    HOST_IP = "192.168.172.75"
+    # IP depuis variable d'environnement (injectée via docker-compose)
+    HOST_IP = _get_host_ip()
     INSTANCE_ID = f"{HOST_IP}:{APP_NAME}:{PORT}"
 
-    url = f"{EUREKA_SERVER}/eureka/apps/{APP_NAME}"
+    url = f"{EUREKA_SERVER}/apps/{APP_NAME}"
 
     payload = {
         "instance": {
@@ -75,18 +68,19 @@ def register():
             "app": APP_NAME,
             "ipAddr": HOST_IP,
             "status": "UP",
-            "port": {"$": PORT, "@enabled": "true"},
+            "port": {"$": int(PORT), "@enabled": "true"},
             "securePort": {"$": 443, "@enabled": "false"},
             "vipAddress": APP_NAME.lower(),
             "secureVipAddress": APP_NAME.lower(),
             "homePageUrl": f"http://{HOST_IP}:{PORT}/",
-            "statusPageUrl": f"http://{HOST_IP}:{PORT}/users/health",
-            "healthCheckUrl": f"http://{HOST_IP}:{PORT}/users/health",
+            "statusPageUrl": f"http://{HOST_IP}:{PORT}/users/health/",
+            "healthCheckUrl": f"http://{HOST_IP}:{PORT}/users/health/",
             "dataCenterInfo": {
                 "@class": "com.netflix.appinfo.InstanceInfo$DefaultDataCenterInfo",
                 "name": "MyOwn"
             },
             "metadata": {
+                "management.port": str(PORT),
                 "instanceId": INSTANCE_ID
             },
             "leaseInfo": {
@@ -97,40 +91,36 @@ def register():
     }
 
     try:
-        #Nettoyage des anciennes instances
         cleanup_old_instances()
-
-        # Enregistrement
         r = requests.post(url, json=payload, timeout=5)
         if r.status_code in [200, 204]:
-            logger.info(f" USER-SERVICE enregistré sur Eureka avec InstanceId: {INSTANCE_ID}")
+            logger.info(f"✅ USER-SERVICE enregistré sur Eureka avec InstanceId: {INSTANCE_ID}")
         else:
-            logger.warning(f"Échec enregistrement Eureka {r.status_code}: {r.text}")
+            logger.warning(f"⚠️ Échec enregistrement Eureka {r.status_code}: {r.text}")
     except Exception as e:
-        logger.error(f"Enregistrement Eureka échoué: {e}")
+        logger.error(f"❌ Enregistrement Eureka échoué: {e}")
 
 
 # ---------------------------
 # HEARTBEAT
 # ---------------------------
 def _should_reregister(status_code):
-    """Retourne True si l’instance n’est plus enregistrée ou DOWN"""
+    """Retourne True si l'instance n'est plus enregistrée ou DOWN"""
     return status_code in (404, 410)
 
 def send_heartbeat():
-    """Envoie un heartbeat à Eureka avec l’IP fixe"""
-    EUREKA_SERVER = get_config("eureka.server", "http://192.168.172.81:8761")
-    APP_NAME = get_config("service.name", "user-service").upper()
-    PORT = str(get_config("service.port", "8000"))
+    """Envoie un heartbeat à Eureka"""
+    EUREKA_SERVER = os.environ.get("EUREKA_URL", get_config("eureka.server", "http://ec2-16-171-142-15.eu-north-1.compute.amazonaws.com:8761"))
+    APP_NAME = "USER-SERVICE"
+    PORT = os.environ.get("APP_PORT", get_config("service.port", "8000"))
 
-    # ⚠️ Toujours la même IP que pour l’enregistrement
-    HOST_IP = "192.168.172.75"
+    HOST_IP = _get_host_ip()
     INSTANCE_ID = f"{HOST_IP}:{APP_NAME}:{PORT}"
-    url = f"{EUREKA_SERVER}/eureka/apps/{APP_NAME}/{INSTANCE_ID}"
+    url = f"{EUREKA_SERVER}/apps/{APP_NAME}/{INSTANCE_ID}"
 
     try:
         r = requests.put(url, timeout=5)
-        logger.info(f"💓 Heartbeat envoyé pour IP {HOST_IP} (status {r.status_code})")
+        logger.info(f"💓 Heartbeat envoyé pour {INSTANCE_ID} (status {r.status_code})")
         return r.status_code
     except Exception as e:
         logger.error(f"❌ Heartbeat échoué: {e}")
@@ -138,7 +128,7 @@ def send_heartbeat():
 
 
 def start_heartbeat_loop():
-    """Boucle infinie qui envoie un heartbeat toutes les 25 secondes et réenregistre si nécessaire"""
+    """Boucle infinie qui envoie un heartbeat toutes les 25 secondes"""
     logger.info("🚀 Démarrage du heartbeat pour USER-SERVICE...")
 
     while True:
@@ -150,8 +140,8 @@ def start_heartbeat_loop():
             logger.warning("Eureka reports instance missing — re-registering...")
             register()
 
-        time.sleep(25)  # intervalle sécurisé
-        
+        time.sleep(25)
+
 
 # ---------------------------
 # EXECUTION DIRECTE

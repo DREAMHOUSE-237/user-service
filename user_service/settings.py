@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECRET / DEBUG / ALLOWED HOSTS
 # ---------------------------
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key")
-DEBUG = os.environ.get("DEBUG", "True") == "True"
+DEBUG = os.environ.get("DEBUG", "False") == "True"
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
 
 # ---------------------------
@@ -23,7 +23,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     'rest_framework',
-    'users.apps.UsersConfig',  # ensure your apps.py has startup tasks
+    'users.apps.UsersConfig',
 ]
 
 MIDDLEWARE = [
@@ -58,27 +58,19 @@ WSGI_APPLICATION = 'user_service.wsgi.application'
 # ---------------------------
 # DATABASE CONFIGURATION
 # ---------------------------
-if os.environ.get("DJANGO_ENV") == "production":
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.mysql',
-            'NAME': os.environ.get("MYSQL_DATABASE", "user_db"),
-            'USER': os.environ.get("MYSQL_USER", "user_user"),
-            'PASSWORD': os.environ.get("MYSQL_PASSWORD", "ebate124"),
-            'HOST': os.environ.get("MYSQL_HOST", "127.0.0.1"),
-            'PORT': os.environ.get("MYSQL_PORT", "3306"),
-            'OPTIONS': {
-                'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            },
-        }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': os.environ.get("MYSQL_DATABASE", "user_db"),
+        'USER': os.environ.get("MYSQL_USER", "user_user"),
+        'PASSWORD': os.environ.get("MYSQL_PASSWORD", "ebate124"),
+        'HOST': os.environ.get("MYSQL_HOST", "dreamhouse237-db.cbc4i248y7jv.eu-north-1.rds.amazonaws.com"),
+        'PORT': os.environ.get("MYSQL_PORT", "3306"),
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+        },
     }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
 # In-memory DB for tests
 if 'test' in sys.argv:
@@ -116,7 +108,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # ---------------------------
 RABBITMQ_URL = os.environ.get(
     "RABBITMQ_URL",
-    "amqp://dreamhouse:dreamhouse@192.168.172.81:5672/%2f"
+    "amqp://guest:guest@localhost:5672/%2f"
 )
 
 # ---------------------------

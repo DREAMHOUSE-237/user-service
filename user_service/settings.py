@@ -64,7 +64,8 @@ DATABASES = {
         'NAME': os.environ.get("MYSQL_DATABASE", "user_db"),
         'USER': os.environ.get("MYSQL_USER", "user_user"),
         'PASSWORD': os.environ.get("MYSQL_PASSWORD", "ebate124"),
-        'HOST': os.environ.get("MYSQL_HOST", "dreamhouse237-db.cbc4i248y7jv.eu-north-1.rds.amazonaws.com"),
+    #   'HOST': os.environ.get("MYSQL_HOST", "dreamhouse237-db.cbc4i248y7jv.eu-north-1.rds.amazonaws.com"),
+        'HOST': os.environ.get("MYSQL_HOST", "127.0.0.1"),
         'PORT': os.environ.get("MYSQL_PORT", "3306"),
         'OPTIONS': {
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",

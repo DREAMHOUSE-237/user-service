@@ -43,5 +43,5 @@ EXPOSE 8000
 # ---------------------------
 # Run with gunicorn
 # ---------------------------
-CMD ["gunicorn", "user_service.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "1"]
+CMD ["gunicorn", "user_service.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "1", "--threads", "1", "--worker-class", "gthread", "--max-requests", "1000", "--max-requests-jitter", "50"]
 #

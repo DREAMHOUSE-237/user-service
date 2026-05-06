@@ -28,92 +28,166 @@ class UsersConfig(AppConfig):
         # 3. Jamais pendant les commandes de gestion
         mgmt_commands_to_skip = {
             "makemigrations", "migrate", "collectstatic", "test", "shell",
-            # IMPORTANT : les consumers eux-mêmes ne doivent pas se relancer
             "consume_user_events", "consume_identity_events",
         }
         if any(cmd in sys.argv for cmd in mgmt_commands_to_skip):
             return
 
-        # ──────────────────────────────────────────────────────────────────
-        # CORRECTION PRINCIPALE
-        #
-        # AVANT (problème) :
-        #   Le guard "RUN_MAIN=true" était censé protéger contre les doubles
-        #   lancements, mais dans Docker avec Gunicorn, RUN_MAIN=true est une
-        #   variable d'ENVIRONNEMENT du conteneur (définie dans docker-compose).
-        #   → Elle est visible par TOUS les workers Gunicorn.
-        #   → Chaque worker appelait ready() et lançait 2 subprocesses Django
-        #     (consume_user_events + consume_identity_events) = ~150 MB chacun.
-        #   → Avec --workers 2 : 4 subprocesses = ~600 MB rien que pour les consumers.
-        #
-        # APRÈS (correction) :
-        #   On utilise os.getpid() == os.getppid()-based detection via
-        #   la variable GUNICORN_WORKER_PID. Gunicorn expose _worker_id sur
-        #   l'objet arbiter. La méthode la plus fiable est d'utiliser un
-        #   fichier lock ou de détecter le master via PPID.
-        #
-        #   Solution simple et robuste : on injecte GUNICORN_MAIN_PID dans
-        #   le Dockerfile CMD, et on compare avec os.getpid().
-        #   Si PIDs correspondent → on est dans le master → on lance les threads.
-        #   Si PIDs diffèrent → on est dans un worker forké → on skip.
-        #
-        #   Pour le dev server Django (runserver), RUN_MAIN=true est injecté
-        #   uniquement par le processus enfant de reloader → OK.
-        # ──────────────────────────────────────────────────────────────────
-
+        # 4. Vérifier si on est dans le master Gunicorn ou runserver
         is_gunicorn_master = str(os.getpid()) == os.environ.get("GUNICORN_MAIN_PID", "")
-        is_runserver       = os.environ.get("RUN_MAIN") == "true"
+        is_runserver = os.environ.get("RUN_MAIN") == "true"
 
-        # En dehors de runserver et gunicorn master → on est dans un worker, on skip
         if not is_gunicorn_master and not is_runserver:
             return
 
-        # ── Désormais on est CERTAIN d'être dans le processus principal ──
-
+        # ── On est dans le processus principal ──
         start_rabbit = os.environ.get("START_RABBITMQ_CONSUMER", "false").lower() in ("1", "true", "yes", "on")
 
         if start_rabbit:
-            # CORRECTION : threads au lieu de subprocesses
-            # subprocess.Popen([sys.executable, "manage.py", "consume_..."]) créait
-            # une instance Django complète (~150 MB) par consumer, par worker.
-            # Les threads partagent la mémoire du processus principal → ~5 MB chacun.
-            self._start_thread(self._run_user_events_consumer,    name="consumer-user-events")
+            self._start_thread(self._run_user_events_consumer, name="consumer-user-events")
             self._start_thread(self._run_identity_events_consumer, name="consumer-identity-events")
 
-        self._start_thread(self._maybe_load_config,    name="config-loader")
+        self._start_thread(self._maybe_load_config, name="config-loader")
         self._start_thread(self._maybe_register_eureka, name="eureka-register")
 
-    # ------------------------------------------------------------------ #
     def _start_thread(self, target, name=None):
         t = threading.Thread(target=target, name=name or target.__name__, daemon=True)
         t.start()
 
-    # ──────────────────────────────────────────────────────────────────
-    # Consumers RabbitMQ — maintenant des THREADS, plus des subprocesses
-    # ──────────────────────────────────────────────────────────────────
-
     def _run_user_events_consumer(self):
-        """Lance consume_user_events directement en thread (sans subprocess)."""
-        import django
-        from django.core.management import call_command
-        try:
-            logger.info("[consumer] Starting consume_user_events thread...")
-            call_command("consume_user_events")
-        except Exception as exc:
-            logger.exception("consume_user_events thread crashed: %s", exc)
+        """Lance le consumer user_events directement sans call_command."""
+        import json
+        import pika
+        import uuid
+        from django.conf import settings
+
+        # Attendre que Django soit complètement initialisé
+        time.sleep(3)
+
+        while True:
+            try:
+                from users.models import Utilisateur, ProcessedEvent
+                from django.db import transaction
+
+                rabbitmq_url = settings.RABBITMQ_URL
+                params = pika.URLParameters(rabbitmq_url)
+                connection = pika.BlockingConnection(params)
+                channel = connection.channel()
+                channel.queue_declare(queue="user_auth_ack", durable=True)
+
+                logger.info("[consumer] Waiting for auth ACK messages in 'user_auth_ack'...")
+
+                def callback(ch, method, properties, body):
+                    try:
+                        data = json.loads(body)
+                        event_id = data.get("event_id", str(uuid.uuid4()))
+
+                        if ProcessedEvent.objects.filter(event_id=event_id).exists():
+                            ch.basic_ack(delivery_tag=method.delivery_tag)
+                            return
+
+                        event_type = data.get("event", "")
+                        with transaction.atomic():
+                            if event_type == "user.auth_created":
+                                user_service_id = data.get("user_service_id")
+                                user_auth_id = data.get("user_auth_id")
+                                if user_service_id and user_auth_id:
+                                    Utilisateur.objects.filter(
+                                        pk=user_service_id,
+                                        user_auth_id__isnull=True,
+                                    ).update(user_auth_id=str(user_auth_id))
+                            ProcessedEvent.objects.create(event_id=event_id)
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+                    except Exception as e:
+                        logger.error(f"Error in user_auth_ack callback: {e}")
+                        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+                channel.basic_qos(prefetch_count=1)
+                channel.basic_consume(queue="user_auth_ack", on_message_callback=callback)
+                channel.start_consuming()
+
+            except Exception as exc:
+                logger.warning(f"[consumer-user-events] crashed: {exc} — retrying in 5s")
+                time.sleep(5)
 
     def _run_identity_events_consumer(self):
-        """Lance consume_identity_events directement en thread (sans subprocess)."""
-        from django.core.management import call_command
-        try:
-            logger.info("[consumer] Starting consume_identity_events thread...")
-            call_command("consume_identity_events")
-        except Exception as exc:
-            logger.exception("consume_identity_events thread crashed: %s", exc)
+        """Lance le consumer identity_events directement sans call_command."""
+        import json
+        import pika
+        import uuid
+        from django.conf import settings
+        from django.core.mail import send_mail
 
-    # ------------------------------------------------------------------ #
-    # Config loader
-    # ------------------------------------------------------------------ #
+        # Attendre que Django soit complètement initialisé
+        time.sleep(3)
+
+        while True:
+            try:
+                from users.models import Utilisateur, ProcessedEvent
+                from django.db import transaction
+
+                params = pika.URLParameters(settings.RABBITMQ_URL)
+                connection = pika.BlockingConnection(params)
+                channel = connection.channel()
+                channel.queue_declare(queue="user_identified", durable=True)
+
+                logger.info("[consumer] Listening on 'user_identified' for identity results...")
+
+                def callback(ch, method, properties, body):
+                    try:
+                        data = json.loads(body)
+                        event_id = data.get("event_id", str(uuid.uuid4()))
+
+                        if ProcessedEvent.objects.filter(event_id=event_id).exists():
+                            ch.basic_ack(delivery_tag=method.delivery_tag)
+                            return
+
+                        email = data.get("email")
+                        evt_status = data.get("status")
+                        requested_role = data.get("requested_role")
+                        rejection_reason = data.get("rejection_reason", "")
+                        nom = data.get("nom", "")
+                        prenom = data.get("prenom", "")
+                        numero_cni = data.get("numero_cni", "")
+
+                        with transaction.atomic():
+                            try:
+                                user = Utilisateur.objects.get(email=email)
+                            except Utilisateur.DoesNotExist:
+                                ProcessedEvent.objects.create(event_id=event_id)
+                                ch.basic_ack(delivery_tag=method.delivery_tag)
+                                return
+
+                            if evt_status == "verified":
+                                user.role = requested_role
+                                user.is_identified = True
+                                user.pending_role = ""
+                                user.cni_nom = nom
+                                user.cni_prenom = prenom
+                                user.cni_numero = numero_cni
+                                user.save(update_fields=[
+                                    'role', 'is_identified', 'pending_role',
+                                    'cni_nom', 'cni_prenom', 'cni_numero',
+                                ])
+                            elif evt_status == "rejected":
+                                user.is_identified = False
+                                user.save(update_fields=['is_identified'])
+
+                            ProcessedEvent.objects.create(event_id=event_id)
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+
+                    except Exception as exc:
+                        logger.exception(f"Error processing identity event: {exc}")
+                        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+                channel.basic_qos(prefetch_count=1)
+                channel.basic_consume(queue="user_identified", on_message_callback=callback)
+                channel.start_consuming()
+
+            except Exception as exc:
+                logger.warning(f"[consumer-identity-events] crashed: {exc} — retrying in 5s")
+                time.sleep(5)
+
     def _maybe_load_config(self):
         try:
             from .services import config_loader
@@ -122,9 +196,6 @@ class UsersConfig(AppConfig):
         except Exception:
             logger.exception("Exception while calling config_loader.load_config()")
 
-    # ------------------------------------------------------------------ #
-    # Eureka registration + heartbeat
-    # ------------------------------------------------------------------ #
     def _maybe_register_eureka(self):
         try:
             from .services import eureka
@@ -133,7 +204,7 @@ class UsersConfig(AppConfig):
             return
 
         max_attempts = int(os.environ.get("EUREKA_REG_MAX_ATTEMPTS", "6"))
-        base_wait    = float(os.environ.get("EUREKA_REG_BASE_WAIT", "2.0"))
+        base_wait = float(os.environ.get("EUREKA_REG_BASE_WAIT", "2.0"))
 
         for attempt in range(1, max_attempts + 1):
             try:

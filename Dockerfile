@@ -51,3 +51,4 @@ CMD ["sh", "-c", "GUNICORN_MAIN_PID=$$ exec gunicorn user_service.wsgi:applicati
     --max-requests 1000 \
     --max-requests-jitter 50 \
     --timeout 30"]
+#

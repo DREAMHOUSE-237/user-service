@@ -2,10 +2,10 @@
 RegistrationService
 -------------------
 1. Validates email uniqueness
-2. Creates the typed user with hashed password
-   - proprietaire/agence: role stored as 'pending_proprietaire'/'pending_agence'
-     until the identity service confirms via RabbitMQ
-   - client: role set immediately, no identity check needed
+2. Creates the typed user with hashed password:
+   - proprietaire/agence: role='pending_xxx' until identity service confirms
+   - client: role set immediately, no identity check needed (OPTIONAL)
+   - admin: role set immediately, full access
 3. Publishes credentials to auth service via RabbitMQ
 4. Sends verification email to the user
 """
@@ -14,7 +14,7 @@ from django.db import transaction
 from django.conf import settings
 from django.core.mail import send_mail
 
-from ..models import Utilisateur, Proprietaire, AgenceImmobiliere, Client
+from ..models import Utilisateur, Proprietaire, AgenceImmobiliere, Client, Admin
 
 logger = logging.getLogger(__name__)
 
@@ -62,25 +62,40 @@ class RegistrationService:
             'tel':          fields.get('tel'),
             'role':         actual_role,
             'pending_role': pending_role,
-            'ville':        fields.get('ville'),
-            'quartier':     fields.get('quartier'),
-            'region':       fields.get('region'),
         }
 
         if role == 'proprietaire':
-            user = Proprietaire(nom=fields['nom'], prenom=fields['prenom'], **common)
+            user = Proprietaire(
+                nom=fields['nom'], prenom=fields['prenom'],
+                ville=fields.get('ville'), quartier=fields.get('quartier'),
+                region=fields.get('region'),
+                **common,
+            )
         elif role == 'agence':
             user = AgenceImmobiliere(
                 nomAgence=fields['nomAgence'],
                 numeroIdentification=fields['numeroIdentification'],
                 nomPDG=fields['nomPDG'],
                 contactPrincipal=fields['contactPrincipal'],
+                ville=fields.get('ville'), quartier=fields.get('quartier'),
+                region=fields.get('region'),
                 **common,
             )
         elif role == 'client':
-            user = Client(nom=fields['nom'], prenom=fields['prenom'], **common)
+            # Client is NOT forced to identify — immediate active role
+            user = Client(
+                nom=fields['nom'], prenom=fields['prenom'],
+                ville=fields.get('ville'), quartier=fields.get('quartier'),
+                region=fields.get('region'),
+                **common,
+            )
+        elif role == 'admin':
+            user = Admin(
+                nom=fields['nom'], prenom=fields['prenom'],
+                **common,
+            )
         else:
-            raise ValueError(f"Rôle inconnu: '{role}'. Choisir parmi: proprietaire, agence, client.")
+            raise ValueError(f"Rôle inconnu: '{role}'. Choisir parmi: proprietaire, agence, client, admin.")
 
         user.set_password(raw_password)
         user.save()

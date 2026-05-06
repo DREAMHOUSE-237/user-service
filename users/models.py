@@ -19,20 +19,29 @@ REGIONS_CAMEROUN = [
     ('sud_ouest',    'Sud-Ouest'),
 ]
 
+ROLE_CHOICES = [
+    ('admin',                'Admin'),
+    ('proprietaire',         'Propriétaire'),
+    ('agence',               'Agence Immobilière'),
+    ('client',               'Client'),
+    ('pending_proprietaire', 'Pending Propriétaire'),
+    ('pending_agence',       'Pending Agence'),
+]
+
 
 class Utilisateur(models.Model):
     user_auth_id = models.CharField(
         max_length=128,
         unique=True,
-        null=True,      # null until auth service confirms and sends back the UUID
+        null=True,
         blank=True,
         help_text="UUID assigned by the authentication service"
     )
-    email = models.EmailField(unique=True)
-    mot_de_passe = models.CharField(max_length=255)   # stored hashed
-    tel = models.CharField(max_length=20, null=True, blank=True)
-    role = models.CharField(max_length=50)
-    is_active = models.BooleanField(default=True)
+    email         = models.EmailField(unique=True)
+    mot_de_passe  = models.CharField(max_length=255)   # stored hashed
+    tel           = models.CharField(max_length=20, null=True, blank=True)
+    role          = models.CharField(max_length=50)
+    is_active     = models.BooleanField(default=True)
 
     # ── Email verification ──────────────────────────────────────────
     is_verified = models.BooleanField(default=False)
@@ -48,13 +57,15 @@ class Utilisateur(models.Model):
         default=False,
         help_text="True once the identity service has verified the CNI"
     )
-    # Stores the requested role while identity check is in progress.
-    # e.g. 'pending_proprietaire' or 'pending_agence'.
-    # Becomes 'proprietaire' / 'agence' after identity confirmation.
     pending_role = models.CharField(
         max_length=50, blank=True, default='',
         help_text="Desired role awaiting identity confirmation"
     )
+
+    # ── CNI data stored from identity service ───────────────────────
+    cni_nom      = models.CharField(max_length=150, blank=True, default='')
+    cni_prenom   = models.CharField(max_length=150, blank=True, default='')
+    cni_numero   = models.CharField(max_length=100, blank=True, default='')
 
     date_creation = models.DateTimeField(auto_now_add=True)
 
@@ -70,25 +81,25 @@ class Utilisateur(models.Model):
 
 
 class Proprietaire(Utilisateur):
-    nom = models.CharField(max_length=100)
-    prenom = models.CharField(max_length=100)
-    ville = models.CharField(max_length=150, null=True, blank=True)
+    nom      = models.CharField(max_length=100)
+    prenom   = models.CharField(max_length=100)
+    ville    = models.CharField(max_length=150, null=True, blank=True)
     quartier = models.CharField(max_length=150, null=True, blank=True)
-    region = models.CharField(
+    region   = models.CharField(
         max_length=50, choices=REGIONS_CAMEROUN, null=True, blank=True,
     )
 
 
 class AgenceImmobiliere(Utilisateur):
-    nomAgence = models.CharField(max_length=100)
-    ville = models.CharField(max_length=150, null=True, blank=True)
-    quartier = models.CharField(max_length=150, null=True, blank=True)
-    region = models.CharField(
+    nomAgence            = models.CharField(max_length=100)
+    ville                = models.CharField(max_length=150, null=True, blank=True)
+    quartier             = models.CharField(max_length=150, null=True, blank=True)
+    region               = models.CharField(
         max_length=50, choices=REGIONS_CAMEROUN, null=True, blank=True,
     )
     numeroIdentification = models.CharField(max_length=50)
-    nomPDG = models.CharField(max_length=100)
-    contactPrincipal = models.CharField(max_length=50)
+    nomPDG               = models.CharField(max_length=100)
+    contactPrincipal     = models.CharField(max_length=50)
 
     class Meta:
         verbose_name = "Agence Immobilière"
@@ -96,11 +107,11 @@ class AgenceImmobiliere(Utilisateur):
 
 
 class Client(Utilisateur):
-    nom = models.CharField(max_length=100)
-    prenom = models.CharField(max_length=100)
-    ville = models.CharField(max_length=150, null=True, blank=True)
+    nom      = models.CharField(max_length=100)
+    prenom   = models.CharField(max_length=100)
+    ville    = models.CharField(max_length=150, null=True, blank=True)
     quartier = models.CharField(max_length=150, null=True, blank=True)
-    region = models.CharField(
+    region   = models.CharField(
         max_length=50, choices=REGIONS_CAMEROUN, null=True, blank=True,
     )
 
@@ -109,25 +120,37 @@ class Client(Utilisateur):
         verbose_name_plural = "Clients"
 
 
+class Admin(Utilisateur):
+    """
+    Admin user — can manage all users and manually validate pending CNI identities.
+    """
+    nom    = models.CharField(max_length=100)
+    prenom = models.CharField(max_length=100)
+
+    class Meta:
+        verbose_name = "Admin"
+        verbose_name_plural = "Admins"
+
+
 class Profile(models.Model):
     utilisateur = models.OneToOneField(
         'Utilisateur', on_delete=models.CASCADE, related_name='profile'
     )
     username = models.CharField(max_length=150)
-    photo = models.ImageField(upload_to="profile_photos/", null=True, blank=True)
-    contact = models.CharField(max_length=50, null=True, blank=True)
-    email = models.EmailField(null=True, blank=True)
+    photo    = models.ImageField(upload_to="profile_photos/", null=True, blank=True)
+    contact  = models.CharField(max_length=50, null=True, blank=True)
+    email    = models.EmailField(null=True, blank=True)
 
     # Location — shared by all roles
-    ville = models.CharField(max_length=150, null=True, blank=True)
+    ville    = models.CharField(max_length=150, null=True, blank=True)
     quartier = models.CharField(max_length=150, null=True, blank=True)
-    region = models.CharField(
+    region   = models.CharField(
         max_length=50, choices=REGIONS_CAMEROUN, null=True, blank=True,
     )
 
     # Agency-specific
     numeroIdentification = models.CharField(max_length=50, null=True, blank=True)
-    nomPDG = models.CharField(max_length=100, null=True, blank=True)
+    nomPDG               = models.CharField(max_length=100, null=True, blank=True)
 
     @property
     def user_auth_id(self):
@@ -138,7 +161,7 @@ class Profile(models.Model):
 
 
 class ProcessedEvent(models.Model):
-    event_id = models.CharField(max_length=128, unique=True)
+    event_id     = models.CharField(max_length=128, unique=True)
     processed_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

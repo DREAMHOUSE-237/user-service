@@ -2,8 +2,8 @@
 consume_identity_events
 -----------------------
 Listens to 'user_identified' queue published by the identity service.
-The identity service sends only: email + status + requested_role.
-We look up the user by email and upgrade their role accordingly.
+Now receives: email, status, requested_role, nom, prenom, numero_cni.
+Stores CNI fields on the user record and upgrades their role.
 """
 import json
 import pika
@@ -15,7 +15,7 @@ from django.core.mail import send_mail
 from django.db import transaction
 from users.models import Utilisateur, ProcessedEvent
 
-logger = logging.getLogger(__name__)
+logger    = logging.getLogger(__name__)
 QUEUE_NAME = "user_identified"
 
 
@@ -23,9 +23,9 @@ class Command(BaseCommand):
     help = "Consume identity verification results from identity service"
 
     def handle(self, *args, **kwargs):
-        params = pika.URLParameters(settings.RABBITMQ_URL)
+        params     = pika.URLParameters(settings.RABBITMQ_URL)
         connection = pika.BlockingConnection(params)
-        channel = connection.channel()
+        channel    = connection.channel()
         channel.queue_declare(queue=QUEUE_NAME, durable=True)
 
         self.stdout.write(self.style.SUCCESS(
@@ -42,9 +42,12 @@ class Command(BaseCommand):
                     return
 
                 email            = data.get("email")
-                status           = data.get("status")
+                evt_status       = data.get("status")
                 requested_role   = data.get("requested_role")
                 rejection_reason = data.get("rejection_reason", "")
+                nom              = data.get("nom", "")
+                prenom           = data.get("prenom", "")
+                numero_cni       = data.get("numero_cni", "")
 
                 with transaction.atomic():
                     try:
@@ -57,18 +60,25 @@ class Command(BaseCommand):
                         ch.basic_ack(delivery_tag=method.delivery_tag)
                         return
 
-                    if status == "verified":
-                        user.role          = requested_role   # e.g. "proprietaire"
+                    if evt_status == "verified":
+                        user.role          = requested_role  # e.g. "proprietaire"
                         user.is_identified = True
                         user.pending_role  = ""
-                        user.save(update_fields=['role', 'is_identified', 'pending_role'])
+                        # Store CNI data
+                        user.cni_nom    = nom
+                        user.cni_prenom = prenom
+                        user.cni_numero = numero_cni
+                        user.save(update_fields=[
+                            'role', 'is_identified', 'pending_role',
+                            'cni_nom', 'cni_prenom', 'cni_numero',
+                        ])
 
                         self.stdout.write(self.style.SUCCESS(
-                            f"[✓] {email} identified → role={requested_role}"
+                            f"[✓] {email} identified → role={requested_role}, cni={numero_cni}"
                         ))
                         self._send_approval_email(user, requested_role)
 
-                    elif status == "rejected":
+                    elif evt_status == "rejected":
                         user.is_identified = False
                         user.save(update_fields=['is_identified'])
 

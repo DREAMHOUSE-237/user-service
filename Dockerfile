@@ -23,28 +23,29 @@ COPY . /app/
 EXPOSE 8000
 
 # ──────────────────────────────────────────────────────────────────────
-# CORRECTIONS :
+# CORRECTIONS APPLIQUÉES :
 #
-# 1. --workers 1 --threads 2 --worker-class gthread
-#    Avant, Gunicorn utilisait probablement le défaut (1 worker sync) mais
-#    dans certaines configs --workers 2+ multipliait les subprocesses.
-#    1 worker gthread suffit pour un service Django léger.
+# 1. --preload
+#    Charge Django dans le master Gunicorn AVANT de forker les workers.
+#    → apps.py ready() est appelé UNE SEULE FOIS, dans le master.
+#    → Les workers forkés héritent de l'état Django sans rappeler ready().
+#    → Élimine le _DeadlockError sur user_service.urls causé par des
+#      imports concurrent au démarrage des threads dans ready().
 #
-# 2. --preload
-#    Charge Django dans le master AVANT de forker les workers.
-#    → apps.py ready() est appelé UNE SEULE FOIS dans le master.
-#    → Les workers forkés héritent du state Django sans rappeler ready().
-#
-# 3. GUNICORN_MAIN_PID=$$
-#    $$ = PID du shell qui lance la commande = PID du master Gunicorn.
+# 2. GUNICORN_MAIN_PID=$$
+#    $$ = PID du shell = PID du master Gunicorn.
 #    apps.py compare os.getpid() avec cette valeur pour savoir s'il
-#    est dans le master (→ lance threads) ou dans un worker (→ skip).
-#    C'est la façon la plus fiable de distinguer master/workers avec --preload.
+#    est dans le master (→ lance les threads) ou un worker (→ skip).
+#
+# 3. --workers 1 --threads 4
+#    1 seul worker gthread est suffisant pour un service Django léger
+#    avec Eureka + consumers en threads. Augmenter les workers sans
+#    --preload multipliait les threads Eureka/consumers par worker.
 # ──────────────────────────────────────────────────────────────────────
 CMD ["sh", "-c", "GUNICORN_MAIN_PID=$$ exec gunicorn user_service.wsgi:application \
     --bind 0.0.0.0:8000 \
     --workers 1 \
-    --threads 2 \
+    --threads 4 \
     --worker-class gthread \
     --preload \
     --max-requests 1000 \

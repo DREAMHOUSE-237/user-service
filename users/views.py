@@ -224,7 +224,6 @@ class AdminUserDetailView(APIView):
         except Utilisateur.DoesNotExist:
             return Response({"error": "Utilisateur non trouvé."}, status=404)
 
-        # Admin can update: role, is_active, tel
         allowed_fields = ['role', 'is_active', 'tel']
         for field in allowed_fields:
             if field in request.data:
@@ -262,22 +261,6 @@ class AdminValidateCNIView(APIView):
     """
     POST /users/admin/validate-cni/
     Admin manually validates (or rejects) a user whose OCR failed.
-    Admin must enter: user_id, nom, prenom, numero_cni, action.
-
-    Body:
-    {
-        "user_id": 42,
-        "action": "approve",
-        "nom": "KAMGA",
-        "prenom": "Jean-Paul",
-        "numero_cni": "123456789"
-    }
-    OR
-    {
-        "user_id": 42,
-        "action": "reject",
-        "rejection_reason": "Document illisible"
-    }
     """
     permission_classes = [AllowAny]
 
@@ -302,7 +285,6 @@ class AdminValidateCNIView(APIView):
             )
 
         if action == 'approve':
-            # Determine final role from pending_role or current role
             final_role = user.pending_role or user.role.replace('pending_', '')
             user.role          = final_role
             user.is_identified = True
@@ -325,7 +307,6 @@ class AdminValidateCNIView(APIView):
                 "numero_cni":  user.cni_numero,
             })
         else:
-            # Reject
             user.is_identified = False
             user.save(update_fields=['is_identified'])
             rejection_reason   = data.get('rejection_reason', '')
@@ -376,19 +357,44 @@ class AdminValidateCNIView(APIView):
             logger.warning("Could not send rejection email: %s", exc)
 
 
-# ── ViewSets avec pagination ──────────────────────────────────────────────── #
+# ── ViewSets ──────────────────────────────────────────────────────────────── #
 
 class UtilisateurViewSet(viewsets.ModelViewSet):
     queryset         = Utilisateur.objects.all()
     serializer_class = UtilisateurSerializer
     pagination_class = StandardPagination
 
+    def get_object(self):
+        """
+        ✅ CORRECTION : lookup par user_auth_id (UUID auth) si le pk
+        transmis ressemble à un UUID, sinon lookup normal par PK entière.
+
+        Le frontend identifie les utilisateurs par leur user_auth_id (UUID
+        renvoyé dans le JWT par auth-service). Ce viewset doit donc accepter
+        les deux formes :
+          - GET /users/1/profile/        → lookup par PK Django (int)
+          - GET /users/<uuid>/profile/   → lookup par user_auth_id
+        """
+        pk = self.kwargs.get(self.lookup_field)
+
+        try:
+            uuid.UUID(str(pk))
+            # C'est un UUID → chercher par user_auth_id
+            queryset = self.filter_queryset(self.get_queryset())
+            obj = queryset.get(user_auth_id=pk)
+            self.check_object_permissions(self.request, obj)
+            return obj
+        except (ValueError, AttributeError):
+            # Ce n'est pas un UUID → lookup normal par PK entière
+            return super().get_object()
+
     @action(detail=True, methods=["get"])
     def profile(self, request, pk=None):
         user = self.get_object()
-        if hasattr(user, "profile"):
+        try:
             return Response(ProfileSerializer(user.profile, context={"request": request}).data)
-        return Response({"detail": "Profile not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Profile.DoesNotExist:
+            return Response({"detail": "Profile not found."}, status=status.HTTP_404_NOT_FOUND)
 
     @action(detail=True, methods=["get"], url_path="attr/(?P<field>[^/.]+)")
     def get_attr(self, request, pk=None, field=None):

@@ -359,34 +359,37 @@ class AdminValidateCNIView(APIView):
 
 # ── ViewSets ──────────────────────────────────────────────────────────────── #
 
-class UtilisateurViewSet(viewsets.ModelViewSet):
-    queryset         = Utilisateur.objects.all()
-    serializer_class = UtilisateurSerializer
-    pagination_class = StandardPagination
+class UUIDOrPKLookupMixin:
+    """
+    Mixin qui permet le lookup par UUID (user_auth_id) OU par PK entière.
+    - Si le pk transmis est un UUID valide → lookup par le champ uuid_field
+    - Sinon → lookup normal par PK Django (int)
+
+    Chaque ViewSet peut surcharger `uuid_field` pour pointer vers le bon champ.
+    Par défaut : 'user_auth_id' (pour les modèles qui héritent de Utilisateur).
+    Pour Profile : 'utilisateur__user_auth_id'.
+    """
+    uuid_field = 'user_auth_id'
 
     def get_object(self):
-        """
-        ✅ CORRECTION : lookup par user_auth_id (UUID auth) si le pk
-        transmis ressemble à un UUID, sinon lookup normal par PK entière.
-
-        Le frontend identifie les utilisateurs par leur user_auth_id (UUID
-        renvoyé dans le JWT par auth-service). Ce viewset doit donc accepter
-        les deux formes :
-          - GET /users/1/profile/        → lookup par PK Django (int)
-          - GET /users/<uuid>/profile/   → lookup par user_auth_id
-        """
         pk = self.kwargs.get(self.lookup_field)
-
         try:
             uuid.UUID(str(pk))
-            # C'est un UUID → chercher par user_auth_id
+            # C'est un UUID → chercher par uuid_field
             queryset = self.filter_queryset(self.get_queryset())
-            obj = queryset.get(user_auth_id=pk)
+            obj = queryset.get(**{self.uuid_field: pk})
             self.check_object_permissions(self.request, obj)
             return obj
         except (ValueError, AttributeError):
             # Ce n'est pas un UUID → lookup normal par PK entière
             return super().get_object()
+
+
+class UtilisateurViewSet(UUIDOrPKLookupMixin, viewsets.ModelViewSet):
+    queryset         = Utilisateur.objects.all()
+    serializer_class = UtilisateurSerializer
+    pagination_class = StandardPagination
+    # uuid_field = 'user_auth_id'  ← valeur par défaut du mixin
 
     @action(detail=True, methods=["get"])
     def profile(self, request, pk=None):
@@ -404,11 +407,12 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
         return Response({"detail": f"Attribute '{field}' not found."}, status=404)
 
 
-class ProfileViewSet(viewsets.ModelViewSet):
+class ProfileViewSet(UUIDOrPKLookupMixin, viewsets.ModelViewSet):
     queryset         = Profile.objects.select_related("utilisateur").all()
     serializer_class = ProfileSerializer
     parser_classes   = [MultiPartParser, FormParser, JSONParser]
     pagination_class = StandardPagination
+    uuid_field       = 'utilisateur__user_auth_id'  # Profile n'a pas de user_auth_id direct
 
     @action(
         detail=True, methods=["patch"], url_path="upload-photo",
@@ -424,25 +428,26 @@ class ProfileViewSet(viewsets.ModelViewSet):
         return Response(ProfileSerializer(profile, context={"request": request}).data)
 
 
-class ProprietaireViewSet(viewsets.ModelViewSet):
+class ProprietaireViewSet(UUIDOrPKLookupMixin, viewsets.ModelViewSet):
     queryset         = Proprietaire.objects.all()
     serializer_class = ProprietaireSerializer
     pagination_class = StandardPagination
+    # uuid_field = 'user_auth_id'  ← hérité de Utilisateur via PTR
 
 
-class AgenceImmobiliereViewSet(viewsets.ModelViewSet):
+class AgenceImmobiliereViewSet(UUIDOrPKLookupMixin, viewsets.ModelViewSet):
     queryset         = AgenceImmobiliere.objects.all()
     serializer_class = AgenceImmobiliereSerializer
     pagination_class = StandardPagination
 
 
-class ClientViewSet(viewsets.ModelViewSet):
+class ClientViewSet(UUIDOrPKLookupMixin, viewsets.ModelViewSet):
     queryset         = Client.objects.all()
     serializer_class = ClientSerializer
     pagination_class = StandardPagination
 
 
-class AdminViewSet(viewsets.ModelViewSet):
+class AdminViewSet(UUIDOrPKLookupMixin, viewsets.ModelViewSet):
     queryset         = Admin.objects.all()
     serializer_class = AdminSerializer
     pagination_class = StandardPagination

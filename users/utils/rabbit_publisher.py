@@ -68,7 +68,7 @@ def publish_message(queue: str, message: dict) -> None:
 def publish_to_auth_service(user, raw_password: str) -> None:
     message = {
         "event":           "user.register",
-        "user_service_id": user.pk,
+        "user_service_id": str(user.pk),   # ✅ CORRECTION : str() — cohérent avec CharField côté auth
         "email":           user.email,
         "password":        raw_password,
         "role":            user.role,
@@ -78,6 +78,18 @@ def publish_to_auth_service(user, raw_password: str) -> None:
 
 
 def publish_user_to_publication(user, profile) -> None:
+    # ✅ CORRECTION : ne pas publier si user_auth_id n'est pas encore connu.
+    # Ce champ est renseigné de manière asynchrone par le consumer user_auth_ack
+    # après que auth-service a créé son AuthUser. Publier avant expose un user_id
+    # incohérent (str(pk) au lieu de l'UUID auth).
+    if not user.user_auth_id:
+        logger.warning(
+            "[→ publication] Skipped: user_auth_id not yet set for %s — "
+            "will be published once auth ACK is received.",
+            user.email,
+        )
+        return
+
     try:
         region_display = dict(
             profile._meta.get_field("region").choices
@@ -86,7 +98,7 @@ def publish_user_to_publication(user, profile) -> None:
         region_display = profile.region
 
     message = {
-        "user_id":              user.user_auth_id or str(user.pk),
+        "user_id":              user.user_auth_id,   # UUID auth — identifiant global
         "email":                user.email,
         "role":                 user.role,
         "tel":                  user.tel,

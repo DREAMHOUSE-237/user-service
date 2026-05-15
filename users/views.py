@@ -18,7 +18,7 @@ from .serializers import (
     UtilisateurSerializer, ProfileSerializer,
     ProprietaireSerializer, AgenceImmobiliereSerializer, ClientSerializer, AdminSerializer,
     RegisterProprietaireSerializer, RegisterAgenceSerializer, RegisterClientSerializer,
-    RegisterAdminSerializer, AdminValidateCNISerializer,
+    RegisterAdminSerializer, AdminValidateCNISerializer, UpdateUserSerializer,
     REGIONS_DICT,
 )
 from .services.registration import RegistrationService
@@ -355,6 +355,135 @@ class AdminValidateCNIView(APIView):
             )
         except Exception as exc:
             logger.warning("Could not send rejection email: %s", exc)
+
+
+# ── Update User (personal info) ───────────────────────────────────────────── #
+
+# Champs autorisés à être mis à jour pour chaque type d'utilisateur
+_COMMON_FIELDS   = {'tel'}
+_ROLE_FIELDS = {
+    'proprietaire':         {'nom', 'prenom', 'ville', 'quartier', 'region'},
+    'pending_proprietaire': {'nom', 'prenom', 'ville', 'quartier', 'region'},
+    'client':               {'nom', 'prenom', 'ville', 'quartier', 'region'},
+    'admin':                {'nom', 'prenom'},
+    'agence':               {'nomAgence', 'nomPDG', 'contactPrincipal', 'ville', 'quartier', 'region'},
+    'pending_agence':       {'nomAgence', 'nomPDG', 'contactPrincipal', 'ville', 'quartier', 'region'},
+}
+
+_ROLE_MODEL_MAP = {
+    'proprietaire':         Proprietaire,
+    'pending_proprietaire': Proprietaire,
+    'agence':               AgenceImmobiliere,
+    'pending_agence':       AgenceImmobiliere,
+    'client':               Client,
+    'admin':                Admin,
+}
+
+_ROLE_SERIALIZER_MAP = {
+    'proprietaire':         ProprietaireSerializer,
+    'pending_proprietaire': ProprietaireSerializer,
+    'agence':               AgenceImmobiliereSerializer,
+    'pending_agence':       AgenceImmobiliereSerializer,
+    'client':               ClientSerializer,
+    'admin':                AdminSerializer,
+}
+
+
+class UpdateUserView(APIView):
+    """
+    PATCH /users/user/<id>/modification/
+
+    Modifie les informations personnelles d'un utilisateur.
+    L'<id> peut être :
+        - un entier  → PK Django
+        - un UUID    → user_auth_id
+
+    Champs acceptés (tous optionnels sauf l'email) :
+        tel
+        nom, prenom                         (Proprietaire / Client / Admin)
+        ville, quartier, region             (Proprietaire / Client / Agence)
+        nomAgence, nomPDG, contactPrincipal (Agence uniquement)
+        ancien_mot_de_passe + nouveau_mot_de_passe  (changement de mot de passe)
+
+    Seuls les champs pertinents pour le rôle de l'utilisateur sont pris en compte.
+    """
+    permission_classes = [AllowAny]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def _get_user(self, pk):
+        """Retourne l'utilisateur en cherchant d'abord par UUID puis par PK entière."""
+        try:
+            uuid.UUID(str(pk))
+            return Utilisateur.objects.get(user_auth_id=pk)
+        except (ValueError, AttributeError):
+            pass
+        try:
+            return Utilisateur.objects.get(pk=pk)
+        except Utilisateur.DoesNotExist:
+            return None
+
+    def patch(self, request, pk):
+        user = self._get_user(pk)
+        if user is None:
+            return Response({"error": "Utilisateur non trouvé."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = UpdateUserSerializer(data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+
+        # ── Changement de mot de passe ─────────────────────────────────
+        ancien  = data.pop('ancien_mot_de_passe', None)
+        nouveau = data.pop('nouveau_mot_de_passe', None)
+        if ancien and nouveau:
+            if not user.check_password(ancien):
+                return Response(
+                    {"ancien_mot_de_passe": "Mot de passe incorrect."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            user.set_password(nouveau)
+
+        # ── Mise à jour du téléphone ───────────────────────────────────
+        if 'tel' in data:
+            user.tel = data.pop('tel')
+
+        # ── Mise à jour des champs spécifiques au rôle ─────────────────
+        role          = user.role.lower()
+        allowed_extra = _ROLE_FIELDS.get(role, set())
+        ModelClass    = _ROLE_MODEL_MAP.get(role)
+
+        typed_user = user  # fallback si le rôle est inconnu
+
+        if ModelClass:
+            try:
+                typed_user = ModelClass.objects.get(pk=user.pk)
+            except ModelClass.DoesNotExist:
+                # L'enregistrement typé n'existe pas encore — on travaille sur Utilisateur
+                typed_user = user
+
+        for field in list(data.keys()):
+            if field in allowed_extra and hasattr(typed_user, field):
+                setattr(typed_user, field, data[field])
+
+        # ── Sauvegarde ────────────────────────────────────────────────
+        if typed_user is not user:
+            # Sauvegarder d'abord le parent (Utilisateur)
+            user.save()
+            typed_user.save()
+        else:
+            user.save()
+
+        # ── Sérialisation de la réponse ────────────────────────────────
+        ResponseSerializer = _ROLE_SERIALIZER_MAP.get(role, UtilisateurSerializer)
+        obj_to_serialize   = typed_user if typed_user is not user else user
+        return Response(
+            {
+                "message":    "Informations mises à jour avec succès.",
+                "utilisateur": ResponseSerializer(obj_to_serialize).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 # ── ViewSets ──────────────────────────────────────────────────────────────── #

@@ -158,6 +158,48 @@ class AdminValidateCNISerializer(serializers.Serializer):
         return attrs
 
 
+class UpdateUserSerializer(serializers.Serializer):
+    """
+    Serializer pour la modification des informations personnelles d'un utilisateur.
+    Tous les champs sont optionnels sauf l'email et seuls les champs fournis seront mis à jour.
+    Le mot de passe nécessite la confirmation de l'ancien mot de passe.
+    """
+    # Champs communs à tous les rôles
+    tel      = serializers.CharField(required=False, allow_blank=True)
+
+    # Changement de mot de passe
+    ancien_mot_de_passe  = serializers.CharField(required=False, write_only=True)
+    nouveau_mot_de_passe = serializers.CharField(required=False, write_only=True, min_length=6)
+
+    # Champs pour Proprietaire / Client / Admin
+    nom      = serializers.CharField(required=False, allow_blank=True)
+    prenom   = serializers.CharField(required=False, allow_blank=True)
+
+    # Champs pour Proprietaire / Client / AgenceImmobiliere
+    ville    = serializers.CharField(required=False, allow_blank=True)
+    quartier = serializers.CharField(required=False, allow_blank=True)
+    region   = serializers.ChoiceField(choices=REGIONS_CAMEROUN, required=False, allow_null=True)
+
+    # Champs spécifiques à AgenceImmobiliere
+    nomAgence        = serializers.CharField(required=False, allow_blank=True)
+    nomPDG           = serializers.CharField(required=False, allow_blank=True)
+    contactPrincipal = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        # Si l'un des champs mot de passe est fourni, les deux sont obligatoires
+        ancien  = attrs.get('ancien_mot_de_passe')
+        nouveau = attrs.get('nouveau_mot_de_passe')
+        if ancien and not nouveau:
+            raise serializers.ValidationError(
+                {"nouveau_mot_de_passe": "Ce champ est requis pour changer le mot de passe."}
+            )
+        if nouveau and not ancien:
+            raise serializers.ValidationError(
+                {"ancien_mot_de_passe": "L'ancien mot de passe est requis pour en définir un nouveau."}
+            )
+        return attrs
+
+
 class UserEventSerializer(serializers.Serializer):
     event_id    = serializers.CharField(max_length=128)
     source      = serializers.CharField()

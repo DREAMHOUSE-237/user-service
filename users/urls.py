@@ -5,6 +5,7 @@ from .views import (
     ProprietaireViewSet, AgenceImmobiliereViewSet, ClientViewSet, AdminViewSet,
     RegisterView, VerifyEmailView, ResendVerificationView,
     AdminUserListView, AdminUserDetailView, AdminPendingUsersView, AdminValidateCNIView,
+    UpdateUserView,
     health, regions,
 )
 
@@ -29,6 +30,9 @@ urlpatterns = [
     path('admin/users/<int:user_id>/',         AdminUserDetailView.as_view(),    name='admin-user-detail'),
     path('admin/pending/',                     AdminPendingUsersView.as_view(),  name='admin-pending-users'),
     path('admin/validate-cni/',                AdminValidateCNIView.as_view(),   name='admin-validate-cni'),
+
+    # ── Modification des informations personnelles ────────────────────
+    path('user/<pk>/modification/',            UpdateUserView.as_view(),         name='user-modification'),
 
     # ── Utility ───────────────────────────────────────────────────
     path('health',    health),

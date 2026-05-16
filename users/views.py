@@ -63,7 +63,8 @@ class RegisterView(APIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def post(self, request):
-        role = (request.data.get("role") or "").lower()
+        data = request.data if isinstance(request.data, dict) else {}
+        role = (data.get("role") or "").lower()
 
         SerializerClass = REGISTER_SERIALIZERS.get(role)
         if not SerializerClass:

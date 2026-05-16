@@ -41,9 +41,12 @@ def _get_channel():
         return _channel
 
 
+# rabbit_publisher.py — remplacer publish_message() par
+
 def publish_message(queue: str, message: dict) -> None:
     try:
-        ch = _get_channel()
+        conn = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
+        ch = conn.channel()
         ch.queue_declare(queue=queue, durable=True)
         ch.basic_publish(
             exchange="",
@@ -51,15 +54,10 @@ def publish_message(queue: str, message: dict) -> None:
             body=json.dumps(message),
             properties=pika.BasicProperties(delivery_mode=2),
         )
+        conn.close()
         logger.info("[RabbitMQ] Publié dans '%s' : %s", queue, message)
-
     except Exception as exc:
-        # Réinitialiser la connexion pour le prochain appel
-        global _connection, _channel
-        with _lock:
-            _connection = None
-            _channel    = None
-        logger.error("[RabbitMQ] Erreur — connexion réinitialisée : %s", exc)
+        logger.error("[RabbitMQ] Erreur publication : %s", exc)
         raise
 
 

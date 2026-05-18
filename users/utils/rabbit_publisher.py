@@ -1,28 +1,32 @@
-# users/utils/rabbit_publisher.py
 """
-CORRECTION : connexion RabbitMQ persistante.
+Connexion RabbitMQ persistante par processus.
 
-Avant, chaque appel publish_message() ouvrait une nouvelle connexion TCP
-et la refermait immédiatement. Appelé depuis le signal post_save(Profile),
-cela créait des connexions en rafale sous charge → fuite mémoire + latence.
+Une seule connexion TCP est maintenue et partagée entre tous les appels.
+Elle est recréée automatiquement si elle se ferme (timeout réseau,
+redémarrage RabbitMQ, etc.).
 
-Maintenant : une seule connexion par processus, recréée automatiquement
-si elle se ferme (timeout réseau, redémarrage RabbitMQ, etc.).
+Helpers métier disponibles :
+  - publish_to_auth_service(user, profile, raw_password)
+      → publie l'événement "user.register" vers l'auth service
+        avec les données d'inscription complètes (email, password,
+        role, région, user_service_id).
 """
 
-import pika
 import json
 import logging
 import threading
 
+import pika
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-_lock = threading.Lock()
+_lock       = threading.Lock()
 _connection = None
 _channel    = None
 
+
+# ── Connexion persistante ───────────────────────────────────────────── #
 
 def _get_channel():
     global _connection, _channel
@@ -41,53 +45,50 @@ def _get_channel():
         return _channel
 
 
-# rabbit_publisher.py — remplacer publish_message() par
+# ── Publication bas niveau ──────────────────────────────────────────── #
 
 def publish_message(queue: str, message: dict) -> None:
+    """
+    Publie un message JSON dans la queue RabbitMQ indiquée.
+    La queue est déclarée durable si elle n'existe pas encore.
+    En cas d'erreur, la connexion est réinitialisée pour le prochain appel.
+    """
     try:
-        conn = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
-        ch = conn.channel()
+        ch = _get_channel()
         ch.queue_declare(queue=queue, durable=True)
         ch.basic_publish(
             exchange="",
             routing_key=queue,
             body=json.dumps(message),
-            properties=pika.BasicProperties(delivery_mode=2),
+            properties=pika.BasicProperties(delivery_mode=2),  # message persistant
         )
-        conn.close()
         logger.info("[RabbitMQ] Publié dans '%s' : %s", queue, message)
+
     except Exception as exc:
-        logger.error("[RabbitMQ] Erreur publication : %s", exc)
+        # Réinitialiser la connexion pour que le prochain appel recrée proprement
+        global _connection, _channel
+        with _lock:
+            _connection = None
+            _channel    = None
+        logger.error("[RabbitMQ] Erreur — connexion réinitialisée : %s", exc)
         raise
 
 
-# ── Helpers métier ─────────────────────────────────────────────────── #
+# ── Helper métier ───────────────────────────────────────────────────── #
 
-def publish_to_auth_service(user, raw_password: str) -> None:
-    message = {
-        "event":           "user.register",
-        "user_service_id": str(user.pk),   # ✅ CORRECTION : str() — cohérent avec CharField côté auth
-        "email":           user.email,
-        "password":        raw_password,
-        "role":            user.role,
-    }
-    publish_message("user_created", message)
-    logger.info("[→ auth] Registration event sent for %s", user.email)
+def publish_to_auth_service(user, profile, raw_password: str) -> None:
+    """
+    Publie l'événement d'inscription vers l'auth service (queue "user_created").
 
-
-def publish_user_to_publication(user, profile) -> None:
-    # ✅ CORRECTION : ne pas publier si user_auth_id n'est pas encore connu.
-    # Ce champ est renseigné de manière asynchrone par le consumer user_auth_ack
-    # après que auth-service a créé son AuthUser. Publier avant expose un user_id
-    # incohérent (str(pk) au lieu de l'UUID auth).
-    if not user.user_auth_id:
-        logger.warning(
-            "[→ publication] Skipped: user_auth_id not yet set for %s — "
-            "will be published once auth ACK is received.",
-            user.email,
-        )
-        return
-
+    Champs envoyés :
+        event            — identifiant de l'événement
+        user_service_id  — PK Django (str) de l'utilisateur dans ce service
+        email            — adresse email
+        password         — mot de passe en clair (hashé côté auth service)
+        role             — rôle de l'utilisateur
+        region           — code région (ex: "CE", "LT", ...)
+        region_display   — libellé complet de la région
+    """
     try:
         region_display = dict(
             profile._meta.get_field("region").choices
@@ -96,22 +97,13 @@ def publish_user_to_publication(user, profile) -> None:
         region_display = profile.region
 
     message = {
-        "user_id":              user.user_auth_id,   # UUID auth — identifiant global
-        "email":                user.email,
-        "role":                 user.role,
-        "tel":                  user.tel,
-        "nom":                  getattr(user, "nom", None),
-        "prenom":               getattr(user, "prenom", None),
-        "nomAgence":            getattr(user, "nomAgence", None),
-        "nomPDG":               getattr(user, "nomPDG", None),
-        "numeroIdentification": getattr(user, "numeroIdentification", None),
-        "contactPrincipal":     getattr(user, "contactPrincipal", None),
-        "region":               profile.region,
-        "region_display":       region_display,
-        "ville":                profile.ville,
-        "quartier":             profile.quartier,
-        "username":             profile.username,
-        "is_verified":          user.is_verified,
+        "event":            "user.register",
+        "user_service_id":  str(user.pk),   # str() — cohérent avec CharField côté auth
+        "email":            user.email,
+        "password":         raw_password,
+        "role":             user.role,
+        "region":           profile.region,
+        "region_display":   region_display,
     }
-    publish_message("user-email-queue", message)
-    logger.info("[→ publication] Profile sync sent for %s", user.email)
+    publish_message("user_created", message)
+    logger.info("[→ auth] Registration event envoyé pour %s", user.email)

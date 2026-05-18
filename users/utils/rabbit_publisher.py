@@ -76,7 +76,7 @@ def publish_message(queue: str, message: dict) -> None:
 
 # ── Helper métier ───────────────────────────────────────────────────── #
 
-def publish_to_auth_service(user, profile, raw_password: str) -> None:
+def publish_to_auth_service(user, raw_password: str) -> None:
     """
     Publie l'événement d'inscription vers l'auth service (queue "user_created").
 
@@ -91,10 +91,10 @@ def publish_to_auth_service(user, profile, raw_password: str) -> None:
     """
     try:
         region_display = dict(
-            profile._meta.get_field("region").choices
-        ).get(profile.region, profile.region)
+            user._meta.get_field("region").choices
+        ).get(user.region, user.region)
     except Exception:
-        region_display = profile.region
+        region_display = user.region
 
     message = {
         "event":            "user.register",
@@ -102,7 +102,7 @@ def publish_to_auth_service(user, profile, raw_password: str) -> None:
         "email":            user.email,
         "password":         raw_password,
         "role":             user.role,
-        "region":           profile.region,
+        "region":           user.region,
         "region_display":   region_display,
     }
     publish_message("user_created", message)

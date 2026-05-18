@@ -113,5 +113,5 @@ def publish_user_to_publication(user, profile) -> None:
         "username":             profile.username,
         "is_verified":          user.is_verified,
     }
-    publish_message("user_profile_sync", message)
+    publish_message("user-email-queue", message)
     logger.info("[→ publication] Profile sync sent for %s", user.email)

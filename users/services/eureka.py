@@ -35,7 +35,7 @@ def _get_host_ip():
 # ---------------------------
 def cleanup_old_instances():
     """Supprime les anciennes instances USER-SERVICE d'Eureka"""
-    EUREKA_SERVER = os.environ.get("EUREKA_URL", get_config("eureka.server", "http://ec2-16-171-142-15.eu-north-1.compute.amazonaws.com:8761"))
+    EUREKA_SERVER = os.environ.get("EUREKA_URL", get_config("eureka.server", "http://ec2-16-171-42-48.eu-north-1.compute.amazonaws.com:8761"))
     APP_NAME = "USER-SERVICE"
 
     try:
@@ -51,7 +51,7 @@ def cleanup_old_instances():
 # ---------------------------
 def register():
     """Enregistre USER-SERVICE sur Eureka"""
-    EUREKA_SERVER = os.environ.get("EUREKA_URL", get_config("eureka.server", "http://ec2-16-171-142-15.eu-north-1.compute.amazonaws.com:8761"))
+    EUREKA_SERVER = os.environ.get("EUREKA_URL", get_config("eureka.server", "http://ec2-16-171-42-48.eu-north-1.compute.amazonaws.com:8761"))
     APP_NAME = "USER-SERVICE"
     PORT = os.environ.get("APP_PORT", get_config("service.port", "8000"))
 
@@ -110,7 +110,7 @@ def _should_reregister(status_code):
 
 def send_heartbeat():
     """Envoie un heartbeat à Eureka"""
-    EUREKA_SERVER = os.environ.get("EUREKA_URL", get_config("eureka.server", "http://ec2-16-171-142-15.eu-north-1.compute.amazonaws.com:8761"))
+    EUREKA_SERVER = os.environ.get("EUREKA_URL", get_config("eureka.server", "http://ec2-16-171-42-48.eu-north-1.compute.amazonaws.com:8761"))
     APP_NAME = "USER-SERVICE"
     PORT = os.environ.get("APP_PORT", get_config("service.port", "8000"))
 

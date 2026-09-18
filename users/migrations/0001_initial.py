@@ -26,7 +26,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='ProcessedEvent',
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True)),
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('event_id', models.CharField(max_length=128, unique=True)),
                 ('processed_at', models.DateTimeField(auto_now_add=True)),
             ],
@@ -34,17 +34,17 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Utilisateur',
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True)),
-                ('user_auth_id', models.CharField(blank=True, max_length=128, null=True, unique=True)),
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('user_auth_id', models.CharField(blank=True, help_text='UUID assigned by the authentication service', max_length=128, null=True, unique=True)),
                 ('email', models.EmailField(unique=True)),
                 ('mot_de_passe', models.CharField(max_length=255)),
                 ('tel', models.CharField(blank=True, max_length=20, null=True)),
                 ('role', models.CharField(max_length=50)),
                 ('is_active', models.BooleanField(default=True)),
                 ('is_verified', models.BooleanField(default=False)),
-                ('verification_token', models.UUIDField(default=uuid.uuid4, editable=False, unique=True)),
-                ('is_identified', models.BooleanField(default=False)),
-                ('pending_role', models.CharField(blank=True, default='', max_length=50)),
+                ('verification_token', models.UUIDField(default=uuid.uuid4, editable=False, help_text='One-time token sent by email for account verification', unique=True)),
+                ('is_identified', models.BooleanField(default=False, help_text='True once the identity service has verified the CNI')),
+                ('pending_role', models.CharField(blank=True, default='', help_text='Desired role awaiting identity confirmation', max_length=50)),
                 ('cni_nom', models.CharField(blank=True, default='', max_length=150)),
                 ('cni_prenom', models.CharField(blank=True, default='', max_length=150)),
                 ('cni_numero', models.CharField(blank=True, default='', max_length=100)),
@@ -54,7 +54,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Profile',
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True)),
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('utilisateur', models.OneToOneField(
                     on_delete=django.db.models.deletion.CASCADE,
                     related_name='profile', to='users.utilisateur',

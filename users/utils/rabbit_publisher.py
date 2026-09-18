@@ -135,3 +135,34 @@ def publish_to_auth_service(user, raw_password: str) -> None:
     publish_message("user_created", message)
 
     logger.info("[→ auth] Registration event sent for %s", user.email)
+
+
+def publish_user_to_publication(user, profile) -> None:
+    """
+    Publie email/région vers publication-service (queue 'user-email-queue',
+    consommée par UserEmailConsumer côté Java).
+
+    Ignoré tant que user_auth_id n'est pas encore renseigné (ACK auth
+    pas encore reçu) - re_publish_after_auth_link() dans signals.py
+    redéclenche l'envoi dès que ce champ est mis à jour.
+    """
+    user_auth_id = getattr(user, "user_auth_id", None)
+    if not user_auth_id:
+        logger.warning(
+            "[→ publication] Skipped: user_auth_id not set yet for %s", user.email
+        )
+        return
+
+    region = getattr(profile, "region", None)
+    region_display = getattr(profile, "region_display", None) or region
+
+    message = {
+        "userId": str(user_auth_id),
+        "email": user.email,
+        "region": region,
+        "region_display": region_display,
+    }
+
+    publish_message("user-email-queue", message)
+
+    logger.info("[→ publication] User email/region sent for %s", user.email)

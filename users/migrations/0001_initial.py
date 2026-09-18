@@ -2,6 +2,19 @@ from django.db import migrations, models
 import django.db.models.deletion
 import uuid
 
+REGIONS = [
+    ('adamaoua',     'Adamaoua'),
+    ('centre',       'Centre'),
+    ('est',          'Est'),
+    ('extreme_nord', 'Extrême-Nord'),
+    ('littoral',     'Littoral'),
+    ('nord',         'Nord'),
+    ('nord_ouest',   'Nord-Ouest'),
+    ('ouest',        'Ouest'),
+    ('sud',          'Sud'),
+    ('sud_ouest',    'Sud-Ouest'),
+]
+
 
 class Migration(migrations.Migration):
 
@@ -52,7 +65,7 @@ class Migration(migrations.Migration):
                 ('email', models.EmailField(blank=True, null=True)),
                 ('ville', models.CharField(blank=True, max_length=150, null=True)),
                 ('quartier', models.CharField(blank=True, max_length=150, null=True)),
-                ('region', models.CharField(blank=True, max_length=50, null=True)),
+                ('region', models.CharField(blank=True, choices=REGIONS, max_length=50, null=True)),
                 ('numeroIdentification', models.CharField(blank=True, max_length=50, null=True)),
                 ('nomPDG', models.CharField(blank=True, max_length=100, null=True)),
             ],
@@ -68,7 +81,7 @@ class Migration(migrations.Migration):
                 ('prenom', models.CharField(max_length=100)),
                 ('ville', models.CharField(blank=True, max_length=150, null=True)),
                 ('quartier', models.CharField(blank=True, max_length=150, null=True)),
-                ('region', models.CharField(blank=True, max_length=50, null=True)),
+                ('region', models.CharField(blank=True, choices=REGIONS, max_length=50, null=True)),
             ],
             bases=('users.utilisateur',),
         ),
@@ -82,7 +95,7 @@ class Migration(migrations.Migration):
                 ('nomAgence', models.CharField(max_length=100)),
                 ('ville', models.CharField(blank=True, max_length=150, null=True)),
                 ('quartier', models.CharField(blank=True, max_length=150, null=True)),
-                ('region', models.CharField(blank=True, max_length=50, null=True)),
+                ('region', models.CharField(blank=True, choices=REGIONS, max_length=50, null=True)),
                 ('numeroIdentification', models.CharField(max_length=50)),
                 ('nomPDG', models.CharField(max_length=100)),
                 ('contactPrincipal', models.CharField(max_length=50)),
@@ -101,7 +114,7 @@ class Migration(migrations.Migration):
                 ('prenom', models.CharField(max_length=100)),
                 ('ville', models.CharField(blank=True, max_length=150, null=True)),
                 ('quartier', models.CharField(blank=True, max_length=150, null=True)),
-                ('region', models.CharField(blank=True, max_length=50, null=True)),
+                ('region', models.CharField(blank=True, choices=REGIONS, max_length=50, null=True)),
             ],
             options={'verbose_name': 'Client', 'verbose_name_plural': 'Clients'},
             bases=('users.utilisateur',),

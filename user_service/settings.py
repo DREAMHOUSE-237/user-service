@@ -61,7 +61,7 @@ DATABASES = {
         'ENGINE':       'django.db.backends.mysql',
         'NAME':         os.environ.get("MYSQL_DATABASE", "user_db"),
         'USER':         os.environ.get("MYSQL_USER", "user_user"),
-        'PASSWORD':     os.environ.get("MYSQL_PASSWORD", "ebate124"),
+        'PASSWORD':     os.environ.get("MYSQL_PASSWORD", ""),
         'HOST': os.environ.get("MYSQL_HOST", "dreamhouse237-db.cbc4i248y7jv.eu-north-1.rds.amazonaws.com"),
         'PORT':         os.environ.get("MYSQL_PORT", "3306"),
         'CONN_MAX_AGE': int(os.environ.get("DB_CONN_MAX_AGE", "60")),  # ← CORRECTION
